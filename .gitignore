@@ -1,0 +1,3 @@
+.cloudbase/
+docker-compose.yml
+Dockerfile.development

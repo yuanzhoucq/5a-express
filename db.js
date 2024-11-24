@@ -20,13 +20,27 @@ const Counter = sequelize.define("Counter", {
   },
 });
 
+const Checker = sequelize.define("Checker", {
+  openid: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    primaryKey: true
+  },
+  checkins: {
+    type: DataTypes.STRING(5000),
+    allowNull: true
+  }
+});
+
 // 数据库初始化方法
 async function init() {
   await Counter.sync({ alter: true });
+  await Checker.sync({ alter: true });
 }
 
 // 导出初始化方法和模型
 module.exports = {
   init,
   Counter,
+  Checker
 };

@@ -2,7 +2,7 @@ const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
-const { init: initDB, Counter } = require("./db");
+const { init: initDB, Counter, Checker } = require("./db");
 
 const logger = morgan("tiny");
 
@@ -46,6 +46,42 @@ app.get("/api/count", async (req, res) => {
 app.get("/api/wx_openid", async (req, res) => {
   if (req.headers["x-wx-source"]) {
     res.send(req.headers["x-wx-openid"]);
+  }
+});
+
+
+// 根据 openid 获取打卡信息
+app.get("/api/checkin", async (req, res) => {
+  if (req.headers["x-wx-openid"]) {
+    const openid = req.headers["x-wx-openid"];
+    const result = await Checker.findByPk(openid);
+    res.send({
+      code: 0,
+      data: result || '',
+    });
+  } else {
+    res.send({
+      code: -1,
+      message: "请使用微信访问",
+    });
+  }
+});
+
+// 根据 openid 更新打卡信息
+app.post("/api/checkin", async (req, res) => {
+  if (req.headers["x-wx-openid"]) {
+    const openid = req.headers["x-wx-openid"];
+    // 更新打卡信息，如果存在则更新，不存在则创建
+    await Checker.upsert({ openid, ...req.body });
+    res.send({
+      code: 0,
+      message: "更新成功",
+    });
+  } else {
+    res.send({
+      code: -1,
+      message: "请使用微信访问",
+    });
   }
 });
 
