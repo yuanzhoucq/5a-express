@@ -98,59 +98,94 @@ app.post("/api/analyze", async (req, res) => {
       });
       return;
     }
-    
-    // 调用 Claude API 进行分析
-    const axios = require('axios');
 
     const checkins = req.body.checkins;
     
-    let analysis = '暂无分析结果';
-    
-    try {
-      // 构建提示词
-      const prompt = `${process.env.AI_PROMPT} 我去过的景区是：\n${checkins || ''}`;
-      console.log(prompt)
-      
-      const response = await axios.post(`${process.env.AI_API_BASE}/v1/messages`, {
-        model: `${process.env.AI_MODEL}`,
-        max_tokens: Number(`${process.env.AI_API_MAX_TOKEN}`),
-        messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
-        ]
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-          'anthropic-version': '2023-06-01',
-          'x-api-key': `${process.env.AI_API_KEY}`
-        }
-      });
-
-      console.log(response)
-      
-      analysis = response.data.content[0].text;
-      
-    } catch (error) {
-      console.error('Claude API 调用失败:', error);
-      analysis = '分析失败，请稍后重试。';
-    }
+    // 异步发起分析请求
+    analyzeCheckins(openid, checkins);
     
     res.send({
       code: 0,
-      data: {
-        checkins: result?.checkins || '',
-        analysis: analysis
-      }
+      message: "分析请求已发起",
     });
   } else {
     res.send({
-      code: -1, 
+      code: -1,
       message: "请使用微信访问"
     });
   }
 });
+
+// 获取分析结果
+app.get("/api/analyze_res", async (req, res) => {
+  if (req.headers["x-wx-openid"]) {
+    const openid = req.headers["x-wx-openid"];
+    const result = await Checker.findByPk(openid);
+    
+    if (!result) {
+      res.send({
+        code: -1,
+        message: "请先打卡",
+      });
+      return;
+    }
+
+    res.send({
+      code: 0,
+      data: {
+        checkins: result?.checkins || '',
+        analysis: result?.analysis || '分析中...'
+      }
+    });
+  } else {
+    res.send({
+      code: -1,
+      message: "请使用微信访问"
+    });
+  }
+});
+
+// 异步分析函数
+async function analyzeCheckins(openid, checkins) {
+  const axios = require('axios');
+  let analysis = '暂无分析结果';
+  
+  try {
+    // 构建提示词
+    const prompt = `${process.env.AI_PROMPT} 我去过的景区是：\n${checkins || ''}`;
+    console.log(prompt)
+    
+    const response = await axios.post(`${process.env.AI_API_BASE}/v1/messages`, {
+      model: `${process.env.AI_MODEL}`,
+      max_tokens: Number(`${process.env.AI_API_MAX_TOKEN}`),
+      messages: [
+        {
+          role: 'user',
+          content: prompt
+        }
+      ]
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        'anthropic-version': '2023-06-01',
+        'x-api-key': `${process.env.AI_API_KEY}`
+      }
+    });
+
+    console.log(response)
+    
+    analysis = response.data.content[0].text;
+    
+  } catch (error) {
+    console.error('Claude API 调用失败:', error);
+    analysis = '分析失败，请稍后重试。';
+  }
+
+  // 将分析结果保存到数据库
+  await Checker.update({ analysis }, {
+    where: { openid }
+  });
+}
 
 
 

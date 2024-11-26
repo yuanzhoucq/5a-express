@@ -29,6 +29,10 @@ const Checker = sequelize.define("Checker", {
   checkins: {
     type: DataTypes.STRING(5000),
     allowNull: true
+  },
+  analysis: {
+    type: DataTypes.STRING(5000),
+    allowNull: true,
   }
 });
 
