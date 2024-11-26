@@ -134,7 +134,7 @@ app.post("/api/analyze", async (req, res) => {
       
     } catch (error) {
       console.error('Claude API 调用失败:', error);
-      analysis = '分析失败,请稍后重试';
+      analysis = '分析失败，请稍后重试。';
     }
     
     res.send({
