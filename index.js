@@ -85,7 +85,6 @@ app.post("/api/checkin", async (req, res) => {
   }
 });
 
-// 连接 Claude.ai 进行分析
 app.post("/api/analyze", async (req, res) => {
   if (req.headers["x-wx-openid"]) {
     const openid = req.headers["x-wx-openid"];
@@ -98,11 +97,30 @@ app.post("/api/analyze", async (req, res) => {
       });
       return;
     }
-
+    console.log(req.body)
     const checkins = req.body.checkins;
+    const aiService = req.body.aiService || 'tongyi';
+    const useCache = req.body.useCache === undefined ? true : req.body.useCache;
+
+    if (useCache) {
+      // 检查数据库中是否存在分析结果
+      const result = await Checker.findByPk(openid);
+      if (result?.analysis) {
+        res.send({
+          code: 0,
+          message: "分析结果已存在",
+        });
+        return;
+      } 
+    } else {
+      // 删除数据库中的分析结果
+      await Checker.update({ analysis: null }, {
+        where: { openid }
+      });
+    }
     
     // 异步发起分析请求
-    analyzeCheckins(openid, checkins);
+    analyzeCheckins(openid, checkins, aiService);
     
     res.send({
       code: 0,
@@ -130,6 +148,20 @@ app.get("/api/analyze_res", async (req, res) => {
       return;
     }
 
+    if (result?.analysis === "分析失败，请稍后重试。") {
+      // 删除数据库中的分析结果
+      await Checker.update({ analysis: null }, {
+        where: { openid }
+      });
+
+      res.send({
+        code: -1,
+        message: "分析失败，请稍后重试。"
+      });
+
+      return;
+    }
+
     res.send({
       code: 0,
       data: {
@@ -146,38 +178,62 @@ app.get("/api/analyze_res", async (req, res) => {
 });
 
 // 异步分析函数
-async function analyzeCheckins(openid, checkins) {
+async function analyzeCheckins(openid, checkins, aiService = 'tongyi') {
   const axios = require('axios');
   let analysis = '暂无分析结果';
   
   try {
     // 构建提示词
     const prompt = `${process.env.AI_PROMPT} 我去过的景区是：\n${checkins || ''}`;
-    console.log(prompt)
-    
-    const response = await axios.post(`${process.env.AI_API_BASE}/v1/messages`, {
-      model: `${process.env.AI_MODEL}`,
-      max_tokens: Number(`${process.env.AI_API_MAX_TOKEN}`),
-      messages: [
-        {
-          role: 'user',
-          content: prompt
-        }
-      ]
-    }, {
-      headers: {
-        'Content-Type': 'application/json',
-        'anthropic-version': '2023-06-01',
-        'x-api-key': `${process.env.AI_API_KEY}`
-      }
-    });
+    console.log(aiService, prompt)
 
-    console.log(response)
-    
-    analysis = response.data.content[0].text;
+    let response;
+
+    switch (aiService) {
+      case 'claude':
+        response = await axios.post(`${process.env.AI_API_BASE}/v1/messages`, {
+          model: `${process.env.AI_MODEL}`,
+          max_tokens: Number(`${process.env.AI_API_MAX_TOKEN}`),
+          messages: [
+            {
+              role: 'user',
+              content: prompt
+            }
+          ]
+        }, {
+          headers: {
+            'Content-Type': 'application/json',
+            'anthropic-version': '2023-06-01',
+            'x-api-key': `${process.env.AI_API_KEY}`
+          }
+        });
+        console.log(response)
+        analysis = response.data.content[0].text;
+        break;
+      case 'tongyi':
+        response = await axios.post(`https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`, {
+          model: `qwen-plus`,
+          max_tokens: Number(`${process.env.AI_API_MAX_TOKEN}`),
+          messages: [
+            {
+              role: 'user',
+              content: prompt
+            }
+          ]
+        }, {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization' : `Bearer ${process.env.TONGYI_API_KEY}`
+          }
+        });
+        console.log(response)
+        analysis = response.data.choices[0].message.content;
+        break;
+    }
+
     
   } catch (error) {
-    console.error('Claude API 调用失败:', error);
+    console.error(`${aiService} API 调用失败:`, error);
     analysis = '分析失败，请稍后重试。';
   }
 
