@@ -97,10 +97,12 @@ app.post("/api/analyze", async (req, res) => {
       });
       return;
     }
-    console.log(req.body)
-    const checkins = req.body.checkins;
+    
+    const checkins = decodeURIComponent(req.body.checkins);
     const aiService = req.body.aiService || 'tongyi';
     const useCache = req.body.useCache === undefined ? true : req.body.useCache;
+
+    console.log({checkins, aiService, useCache})
 
     if (useCache) {
       // 检查数据库中是否存在分析结果
