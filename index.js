@@ -99,7 +99,7 @@ app.post("/api/analyze", async (req, res) => {
     }
     
     const checkins = decodeURIComponent(req.body.checkins);
-    const aiService = req.body.aiService || 'tongyi';
+    const aiService = req.body.aiService || 'deepseek';
     const useCache = req.body.useCache === undefined ? true : req.body.useCache;
 
     console.log({checkins, aiService, useCache})
@@ -180,7 +180,7 @@ app.get("/api/analyze_res", async (req, res) => {
 });
 
 // 异步分析函数
-async function analyzeCheckins(openid, checkins, aiService = 'tongyi') {
+async function analyzeCheckins(openid, checkins, aiService = 'deepseek') {
   const axios = require('axios');
   let analysis = '暂无分析结果';
   
@@ -226,6 +226,26 @@ async function analyzeCheckins(openid, checkins, aiService = 'tongyi') {
           headers: {
             'Content-Type': 'application/json',
             'Authorization' : `Bearer ${process.env.TONGYI_API_KEY}`
+          }
+        });
+        console.log(response)
+        analysis = response.data.choices[0].message.content;
+        break;
+      case 'deepseek':
+        response = await axios.post(`https://api.deepseek.com/chat/completions`, {
+          model: `deepseek-chat`,
+          temperature: 1.5,
+          max_tokens: Number(`${process.env.AI_API_MAX_TOKEN}`),
+          messages: [
+            {
+              role: 'user',
+              content: prompt
+            }
+          ]
+        }, {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization' : `Bearer ${process.env.DEEPSEEK_API_KEY}`
           }
         });
         console.log(response)
