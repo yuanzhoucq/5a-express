@@ -36,15 +36,30 @@ const Checker = sequelize.define("Checker", {
   }
 });
 
+const CheckRate = sequelize.define("CheckRate", {
+  sceneid: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    primaryKey: true
+  },
+  rate: {
+    type: DataTypes.FLOAT,
+    allowNull: false,
+    defaultValue: 0,
+  },
+});
+
 // 数据库初始化方法
 async function init() {
   await Counter.sync({ alter: true });
   await Checker.sync({ alter: true });
+  await CheckRate.sync({ alter: true });
 }
 
 // 导出初始化方法和模型
 module.exports = {
   init,
   Counter,
-  Checker
+  Checker,
+  CheckRate
 };

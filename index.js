@@ -42,6 +42,83 @@ app.get("/api/count", async (req, res) => {
   });
 });
 
+// 更新打卡率
+app.get("/api/checkrate", async (req, res) => {
+  try {
+    const { Checker, CheckRate } = require('./db');
+    const { scenes } = require('./scenes.js');
+
+    // 1. 获取所有有打卡记录的用户
+    const checkers = await Checker.findAll({
+      where: {
+        checkins: {
+          [require('sequelize').Op.ne]: null,
+          [require('sequelize').Op.ne]: ''
+        }
+      }
+    });
+
+    // 2. 统计每个景区的打卡次数
+    const sceneCounts = {};
+    const totalUsers = checkers.length;
+
+    // 初始化所有景区的计数为0
+    scenes.forEach(scene => {
+      sceneCounts[scene.id] = 0;
+    });
+
+    // 统计每个景区的打卡次数
+    checkers.forEach(checker => {
+      if (checker.checkins) {
+        // 假设checkins是以逗号分隔的景区ID列表，如 "js001,js002,js003"
+        const checkedScenes = checker.checkins.split(',');
+        checkedScenes.forEach(sceneId => {
+          if (sceneId.trim() && sceneCounts.hasOwnProperty(sceneId.trim())) {
+            sceneCounts[sceneId.trim()]++;
+          }
+        });
+      }
+    });
+
+    // 3. 计算每个景区的打卡率并更新到数据库
+    const checkRates = [];
+
+    for (const scene of scenes) {
+      const count = sceneCounts[scene.id];
+      const rate = totalUsers > 0 ? (count / totalUsers) * 100 : 0;
+
+      // 创建或更新CheckRate记录
+      await CheckRate.upsert({
+        sceneid: scene.id,
+        rate: parseFloat(rate.toFixed(2))
+      });
+
+      checkRates.push({
+        sceneid: scene.id,
+        name: scene.name,
+        province: scene.province,
+        city: scene.city,
+        count: count,
+        rate: parseFloat(rate.toFixed(2)),
+        totalUsers: totalUsers
+      });
+    }
+
+    // 4. 返回所有打卡率数据
+    res.send({
+      code: 0,
+      data: checkRates
+    });
+
+  } catch (error) {
+    console.error('更新打卡率失败:', error);
+    res.send({
+      code: -1,
+      message: '更新打卡率失败'
+    });
+  }
+});
+
 // 小程序调用，获取微信 Open ID
 app.get("/api/wx_openid", async (req, res) => {
   if (req.headers["x-wx-source"]) {
