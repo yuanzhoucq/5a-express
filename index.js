@@ -47,67 +47,87 @@ app.get("/api/checkrate", async (req, res) => {
   try {
     const { Checker, CheckRate } = require('./db');
     const { scenes } = require('./scenes.js');
+    const { Op } = require('sequelize');
 
-    // 1. 获取所有有打卡记录的用户
-    const checkers = await Checker.findAll({
-      where: {
-        checkins: {
-          [require('sequelize').Op.ne]: null,
-          [require('sequelize').Op.ne]: ''
-        }
-      }
-    });
+    // 1. 检查是否需要更新数据：检查js001的更新时间
+    const js001Record = await CheckRate.findByPk('js001');
+    const now = new Date();
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-    // 2. 统计每个景区的打卡次数
-    const sceneCounts = {};
-    const totalUsers = checkers.length;
+    // 如果js001记录不存在或者更新时间是昨天或更早，则需要重新计算
+    const needsUpdate = !js001Record ||
+                       !js001Record.updatedAt ||
+                       new Date(js001Record.updatedAt) < yesterday;
 
-    // 初始化所有景区的计数为0
-    scenes.forEach(scene => {
-      sceneCounts[scene.id] = 0;
-    });
-
-    // 统计每个景区的打卡次数
-    checkers.forEach(checker => {
-      if (checker.checkins) {
-        // 假设checkins是以逗号分隔的景区ID列表，如 "js001,js002,js003"
-        const checkedScenes = checker.checkins.split(',');
-        checkedScenes.forEach(sceneId => {
-          if (sceneId.trim() && sceneCounts.hasOwnProperty(sceneId.trim())) {
-            sceneCounts[sceneId.trim()]++;
+    if (needsUpdate) {
+      // 2. 获取所有有打卡记录的用户
+      const checkers = await Checker.findAll({
+        where: {
+          checkins: {
+            [Op.ne]: null,
+            [Op.ne]: ''
           }
+        }
+      });
+
+      // 3. 统计每个景区的打卡次数
+      const sceneCounts = {};
+      const totalUsers = checkers.length;
+
+      // 初始化所有景区的计数为0
+      scenes.forEach(scene => {
+        sceneCounts[scene.id] = 0;
+      });
+
+      // 统计每个景区的打卡次数
+      checkers.forEach(checker => {
+        if (checker.checkins) {
+          // 假设checkins是以逗号分隔的景区ID列表，如 "js001,js002,js003"
+          const checkedScenes = checker.checkins.split(',');
+          checkedScenes.forEach(sceneId => {
+            if (sceneId.trim() && sceneCounts.hasOwnProperty(sceneId.trim())) {
+              sceneCounts[sceneId.trim()]++;
+            }
+          });
+        }
+      });
+
+      // 4. 计算每个景区的打卡率并更新到数据库
+      for (const scene of scenes) {
+        const count = sceneCounts[scene.id];
+        const rate = totalUsers > 0 ? (count / totalUsers) * 100 : 0;
+
+        // 创建或更新CheckRate记录
+        await CheckRate.upsert({
+          sceneid: scene.id,
+          rate: parseFloat(rate.toFixed(2))
         });
       }
-    });
-
-    // 3. 计算每个景区的打卡率并更新到数据库
-    const checkRates = [];
-
-    for (const scene of scenes) {
-      const count = sceneCounts[scene.id];
-      const rate = totalUsers > 0 ? (count / totalUsers) * 100 : 0;
-
-      // 创建或更新CheckRate记录
-      await CheckRate.upsert({
-        sceneid: scene.id,
-        rate: parseFloat(rate.toFixed(2))
-      });
-
-      checkRates.push({
-        sceneid: scene.id,
-        name: scene.name,
-        province: scene.province,
-        city: scene.city,
-        count: count,
-        rate: parseFloat(rate.toFixed(2)),
-        totalUsers: totalUsers
-      });
     }
 
-    // 4. 返回所有打卡率数据
+    // 5. 从数据库直接返回所有打卡率数据
+    const allCheckRates = await CheckRate.findAll();
+    const checkRates = [];
+
+    for (const checkRate of allCheckRates) {
+      const scene = scenes.find(s => s.id === checkRate.sceneid);
+      if (scene) {
+        checkRates.push({
+          sceneid: checkRate.sceneid,
+          name: scene.name,
+          province: scene.province,
+          city: scene.city,
+          rate: checkRate.rate,
+          updatedAt: checkRate.updatedAt
+        });
+      }
+    }
+
+    // 6. 返回所有打卡率数据
     res.send({
       code: 0,
-      data: checkRates
+      data: checkRates,
+      fromCache: !needsUpdate
     });
 
   } catch (error) {
