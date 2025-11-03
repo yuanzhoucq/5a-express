@@ -30,6 +30,10 @@ const Checker = sequelize.define("Checker", {
     type: DataTypes.STRING(5000),
     allowNull: true
   },
+  starred: {
+    type: DataTypes.STRING(5000),
+    allowNull: true
+  },
   analysis: {
     type: DataTypes.STRING(5000),
     allowNull: true,

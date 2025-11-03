@@ -2,7 +2,7 @@ const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
-const { init: initDB, Counter, Checker } = require("./db");
+const { init: initDB, Counter, Checker, CheckRate } = require("./db");
 
 const logger = morgan("tiny");
 
@@ -45,7 +45,6 @@ app.get("/api/count", async (req, res) => {
 // 更新打卡率
 app.get("/api/checkrate", async (req, res) => {
   try {
-    const { Checker, CheckRate } = require('./db');
     const { scenes } = require('./scenes.js');
     const { Op } = require('sequelize');
 
