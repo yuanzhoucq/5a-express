@@ -2,6 +2,7 @@ const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
+const cron = require("node-cron");
 const { init: initDB, Counter, Checker, CheckRate } = require("./db");
 
 const logger = morgan("tiny");
@@ -42,69 +43,12 @@ app.get("/api/count", async (req, res) => {
   });
 });
 
-// 更新打卡率
+// 获取打卡率数据（总是返回缓存数据）
 app.get("/api/checkrate", async (req, res) => {
   try {
     const { scenes } = require('./scenes.js');
-    const { Op } = require('sequelize');
 
-    // 1. 检查是否需要更新数据：检查js001的更新时间
-    const js001Record = await CheckRate.findByPk('js001');
-    const now = new Date();
-    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
-    // 如果js001记录不存在或者更新时间是昨天或更早，则需要重新计算
-    const needsUpdate = !js001Record ||
-                       !js001Record.updatedAt ||
-                       new Date(js001Record.updatedAt) < yesterday;
-
-    if (needsUpdate) {
-      // 2. 获取所有有打卡记录的用户
-      const checkers = await Checker.findAll({
-        where: {
-          checkins: {
-            [Op.ne]: null,
-            [Op.ne]: ''
-          }
-        }
-      });
-
-      // 3. 统计每个景区的打卡次数
-      const sceneCounts = {};
-      const totalUsers = checkers.length;
-
-      // 初始化所有景区的计数为0
-      scenes.forEach(scene => {
-        sceneCounts[scene.id] = 0;
-      });
-
-      // 统计每个景区的打卡次数
-      checkers.forEach(checker => {
-        if (checker.checkins) {
-          // 假设checkins是以逗号分隔的景区ID列表，如 "js001,js002,js003"
-          const checkedScenes = checker.checkins.split(',');
-          checkedScenes.forEach(sceneId => {
-            if (sceneId.trim() && sceneCounts.hasOwnProperty(sceneId.trim())) {
-              sceneCounts[sceneId.trim()]++;
-            }
-          });
-        }
-      });
-
-      // 4. 计算每个景区的打卡率并更新到数据库
-      for (const scene of scenes) {
-        const count = sceneCounts[scene.id];
-        const rate = totalUsers > 0 ? (count / totalUsers) * 100 : 0;
-
-        // 创建或更新CheckRate记录
-        await CheckRate.upsert({
-          sceneid: scene.id,
-          rate: parseFloat(rate.toFixed(2))
-        });
-      }
-    }
-
-    // 5. 从数据库直接返回所有打卡率数据
+    // 直接从数据库返回所有打卡率数据
     const allCheckRates = await CheckRate.findAll();
     const checkRates = [];
 
@@ -122,18 +66,18 @@ app.get("/api/checkrate", async (req, res) => {
       }
     }
 
-    // 6. 返回所有打卡率数据
+    // 返回所有打卡率数据
     res.send({
       code: 0,
       data: checkRates,
-      fromCache: !needsUpdate
+      fromCache: true
     });
 
   } catch (error) {
-    console.error('更新打卡率失败:', error);
+    console.error('获取打卡率失败:', error);
     res.send({
       code: -1,
-      message: '更新打卡率失败'
+      message: '获取打卡率失败'
     });
   }
 });
@@ -361,14 +305,83 @@ async function analyzeCheckins(openid, checkins, aiService = 'deepseek') {
   });
 }
 
+// 更新打卡率数据的函数
+async function updateCheckRates() {
+  try {
+    const { scenes } = require('./scenes.js');
+    const { Op } = require('sequelize');
 
+    console.log('开始更新打卡率数据...');
+
+    // 获取所有有打卡记录的用户
+    const checkers = await Checker.findAll({
+      where: {
+        checkins: {
+          [Op.ne]: null,
+          [Op.ne]: ''
+        }
+      }
+    });
+
+    // 统计每个景区的打卡次数
+    const sceneCounts = {};
+    const totalUsers = checkers.length;
+
+    // 初始化所有景区的计数为0
+    scenes.forEach(scene => {
+      sceneCounts[scene.id] = 0;
+    });
+
+    // 统计每个景区的打卡次数
+    checkers.forEach(checker => {
+      if (checker.checkins) {
+        // 假设checkins是以逗号分隔的景区ID列表，如 "js001,js002,js003"
+        const checkedScenes = checker.checkins.split(',');
+        checkedScenes.forEach(sceneId => {
+          if (sceneId.trim() && sceneCounts.hasOwnProperty(sceneId.trim())) {
+            sceneCounts[sceneId.trim()]++;
+          }
+        });
+      }
+    });
+
+    // 计算每个景区的打卡率并更新到数据库
+    for (const scene of scenes) {
+      const count = sceneCounts[scene.id];
+      const rate = totalUsers > 0 ? (count / totalUsers) * 100 : 0;
+
+      // 创建或更新CheckRate记录
+      await CheckRate.upsert({
+        sceneid: scene.id,
+        rate: parseFloat(rate.toFixed(2))
+      });
+    }
+
+    console.log('打卡率数据更新完成，总用户数:', totalUsers);
+  } catch (error) {
+    console.error('自动更新打卡率失败:', error);
+  }
+}
 
 const port = process.env.PORT || 80;
 
 async function bootstrap() {
   await initDB();
+
+  // 设置每天凌晨3点自动更新打卡率数据
+  cron.schedule('0 3 * * *', () => {
+    console.log('执行每日打卡率数据更新...');
+    updateCheckRates();
+  }, {
+    timezone: 'Asia/Shanghai'
+  });
+
+  // 启动时也更新一次数据，确保有初始数据
+  updateCheckRates();
+
   app.listen(port, () => {
     console.log("启动成功", port);
+    console.log("打卡率数据将在每天凌晨3点自动更新");
   });
 }
 
