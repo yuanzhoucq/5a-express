@@ -1,4 +1,5 @@
 .cloudbase/
-docker-compose.yml
 Dockerfile.development
 node_modules/
+data/
+.env

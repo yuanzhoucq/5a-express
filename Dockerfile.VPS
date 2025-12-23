@@ -1,0 +1,25 @@
+ FROM node:18-alpine
+ 
+ # 安装构建依赖 (sqlite3 等原生模块需要)
+ RUN apk add --no-cache tzdata python3 make g++ && \
+     cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+     echo "Asia/Shanghai" > /etc/timezone
+ 
+ WORKDIR /app
+ 
+ # 仅安装生产环境依赖
+ COPY package*.json ./
+ RUN npm install --production && \
+     apk del python3 make g++ # 安装完后可以删除构建工具以减小体积
+
+# 拷贝项目源码
+COPY . .
+
+# 确保数据持久化目录存在
+RUN mkdir -p data
+
+# 默认端口
+ENV PORT=3000
+EXPOSE 3000
+
+CMD ["npm", "start"]

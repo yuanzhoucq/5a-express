@@ -82,148 +82,149 @@ app.get("/api/checkrate", async (req, res) => {
   }
 });
 
-// 小程序调用，获取微信 Open ID
-app.get("/api/wx_openid", async (req, res) => {
-  if (req.headers["x-wx-source"]) {
-    res.send(req.headers["x-wx-openid"]);
+// 小程序登录 - 通过 code 换取 openid
+app.post("/api/login", async (req, res) => {
+  const { code } = req.body;
+
+  if (!code) {
+    return res.send({ code: -1, message: "缺少 code 参数" });
+  }
+
+  try {
+    const axios = require('axios');
+    const response = await axios.get('https://api.weixin.qq.com/sns/jscode2session', {
+      params: {
+        appid: process.env.WX_APPID,
+        secret: process.env.WX_SECRET,
+        js_code: code,
+        grant_type: 'authorization_code'
+      }
+    });
+
+    const { openid, errcode, errmsg } = response.data;
+
+    if (errcode) {
+      console.error('微信登录失败:', errcode, errmsg);
+      return res.send({ code: -1, message: errmsg || '登录失败' });
+    }
+
+    res.send({ code: 0, openid });
+  } catch (error) {
+    console.error('登录接口异常:', error);
+    res.send({ code: -1, message: '登录服务异常' });
   }
 });
 
+// 获取 openid：优先从云托管 header，否则从请求参数获取
+function getOpenid(req) {
+  // 微信云托管环境
+  if (req.headers["x-wx-openid"]) {
+    return req.headers["x-wx-openid"];
+  }
+  // 自托管环境：从请求头或 body/query 获取
+  return req.headers["authorization"] || req.body?.openid || req.query?.openid;
+}
 
+// openid 格式校验
+function isValidOpenid(openid) {
+  if (!openid || typeof openid !== 'string') return false;
+  return /^o[A-Za-z0-9_-]{27}$/.test(openid);
+}
 // 根据 openid 获取打卡信息
 app.get("/api/checkin", async (req, res) => {
-  if (req.headers["x-wx-openid"]) {
-    const openid = req.headers["x-wx-openid"];
-    const result = await Checker.findByPk(openid);
-    res.send({
-      code: 0,
-      data: result || '',
-    });
-  } else {
-    res.send({
-      code: -1,
-      message: "请使用微信访问",
-    });
+  const openid = getOpenid(req);
+  if (!isValidOpenid(openid)) {
+    return res.send({ code: -1, message: "无效的 openid" });
   }
+
+  const result = await Checker.findByPk(openid);
+  res.send({
+    code: 0,
+    data: result || '',
+  });
 });
 
 // 根据 openid 更新打卡信息
 app.post("/api/checkin", async (req, res) => {
-  if (req.headers["x-wx-openid"]) {
-    const openid = req.headers["x-wx-openid"];
-    // 更新打卡信息，如果存在则更新，不存在则创建
-    await Checker.upsert({ openid, ...req.body });
-    res.send({
-      code: 0,
-      message: "更新成功",
-    });
-  } else {
-    res.send({
-      code: -1,
-      message: "请使用微信访问",
-    });
+  const openid = getOpenid(req);
+  if (!isValidOpenid(openid)) {
+    return res.send({ code: -1, message: "无效的 openid" });
   }
+
+  // 更新打卡信息，如果存在则更新，不存在则创建
+  await Checker.upsert({ openid, ...req.body });
+  res.send({
+    code: 0,
+    message: "更新成功",
+  });
 });
 
 app.post("/api/analyze", async (req, res) => {
-  if (req.headers["x-wx-openid"]) {
-    const openid = req.headers["x-wx-openid"];
-    // 检查 openid 是否存在
-    const result = await Checker.findByPk(openid);
-    if (!result) {
-      res.send({
-        code: -1,
-        message: "请先打卡",
-      });
-      return;
-    }
-    
-    const checkins = decodeURIComponent(req.body.checkins);
-    const aiService = req.body.aiService || 'deepseek';
-    const useCache = req.body.useCache === undefined ? true : req.body.useCache;
-
-    console.log({checkins, aiService, useCache})
-
-    if (useCache) {
-      // 检查数据库中是否存在分析结果
-      const result = await Checker.findByPk(openid);
-      if (result?.analysis) {
-        res.send({
-          code: 0,
-          message: "分析结果已存在",
-        });
-        return;
-      } 
-    } else {
-      // 删除数据库中的分析结果
-      await Checker.update({ analysis: null }, {
-        where: { openid }
-      });
-    }
-    
-    // 异步发起分析请求
-    analyzeCheckins(openid, checkins, aiService);
-    
-    res.send({
-      code: 0,
-      message: "分析请求已发起",
-    });
-  } else {
-    res.send({
-      code: -1,
-      message: "请使用微信访问"
-    });
+  const openid = getOpenid(req);
+  if (!isValidOpenid(openid)) {
+    return res.send({ code: -1, message: "无效的 openid" });
   }
+
+  // 检查 openid 是否存在
+  const result = await Checker.findByPk(openid);
+  if (!result) {
+    return res.send({ code: -1, message: "请先打卡" });
+  }
+
+  const checkins = decodeURIComponent(req.body.checkins);
+  const aiService = req.body.aiService || 'deepseek';
+  const useCache = req.body.useCache === undefined ? true : req.body.useCache;
+
+  console.log({ checkins, aiService, useCache })
+
+  if (useCache) {
+    // 检查数据库中是否存在分析结果
+    if (result?.analysis) {
+      return res.send({ code: 0, message: "分析结果已存在" });
+    }
+  } else {
+    // 删除数据库中的分析结果
+    await Checker.update({ analysis: null }, { where: { openid } });
+  }
+
+  // 异步发起分析请求
+  analyzeCheckins(openid, checkins, aiService);
+
+  res.send({ code: 0, message: "分析请求已发起" });
 });
 
 // 获取分析结果
 app.get("/api/analyze_res", async (req, res) => {
-  if (req.headers["x-wx-openid"]) {
-    const openid = req.headers["x-wx-openid"];
-    const result = await Checker.findByPk(openid);
-    
-    if (!result) {
-      res.send({
-        code: -1,
-        message: "请先打卡",
-      });
-      return;
-    }
-
-    if (result?.analysis === "分析失败，请稍后重试。") {
-      // 删除数据库中的分析结果
-      await Checker.update({ analysis: null }, {
-        where: { openid }
-      });
-
-      res.send({
-        code: -1,
-        message: "分析失败，请稍后重试。"
-      });
-
-      return;
-    }
-
-    res.send({
-      code: 0,
-      data: {
-        checkins: result?.checkins || '',
-        analysis: result?.analysis || '分析中...'
-      }
-    });
-  } else {
-    res.send({
-      code: -1,
-      message: "请使用微信访问"
-    });
+  const openid = getOpenid(req);
+  if (!isValidOpenid(openid)) {
+    return res.send({ code: -1, message: "无效的 openid" });
   }
+
+  const result = await Checker.findByPk(openid);
+
+  if (!result) {
+    return res.send({ code: -1, message: "请先打卡" });
+  }
+
+  if (result?.analysis === "分析失败，请稍后重试。") {
+    await Checker.update({ analysis: null }, { where: { openid } });
+    return res.send({ code: -1, message: "分析失败，请稍后重试。" });
+  }
+
+  res.send({
+    code: 0,
+    data: {
+      checkins: result?.checkins || '',
+      analysis: result?.analysis || '分析中...'
+    }
+  });
 });
 
 // 异步分析函数
 async function analyzeCheckins(openid, checkins, aiService = 'deepseek') {
   const axios = require('axios');
   let analysis = '暂无分析结果';
-  
+
   try {
     // 构建提示词
     const prompt = `${process.env.AI_PROMPT} 我去过的景区是：\n${checkins || ''}`;
@@ -265,7 +266,7 @@ async function analyzeCheckins(openid, checkins, aiService = 'deepseek') {
         }, {
           headers: {
             'Content-Type': 'application/json',
-            'Authorization' : `Bearer ${process.env.TONGYI_API_KEY}`
+            'Authorization': `Bearer ${process.env.TONGYI_API_KEY}`
           }
         });
         console.log(response)
@@ -285,7 +286,7 @@ async function analyzeCheckins(openid, checkins, aiService = 'deepseek') {
         }, {
           headers: {
             'Content-Type': 'application/json',
-            'Authorization' : `Bearer ${process.env.DEEPSEEK_API_KEY}`
+            'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
           }
         });
         console.log(response)
@@ -293,7 +294,7 @@ async function analyzeCheckins(openid, checkins, aiService = 'deepseek') {
         break;
     }
 
-    
+
   } catch (error) {
     console.error(`${aiService} API 调用失败:`, error);
     analysis = '分析失败，请稍后重试。';

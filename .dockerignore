@@ -1,0 +1,8 @@
+node_modules
+data
+.env
+.git
+.cloudbase
+Dockerfile
+Dockerfile.VPS
+docker-compose.yml

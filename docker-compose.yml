@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.VPS
+    container_name: 5a-express
+    restart: always
+    ports:
+      - "127.0.0.1:3000:3000" # 统一使用 3000 端口，由 cloudflared 穿透
+    volumes:
+      - ./data:/app/data # 持久化 SQLite 数据库文件
+    env_file:
+      - .env
+    environment:
+      - PORT=3000
+      - NODE_ENV=production

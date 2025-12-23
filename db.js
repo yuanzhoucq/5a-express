@@ -1,15 +1,30 @@
+const path = require("path");
 const { Sequelize, DataTypes } = require("sequelize");
 
-// 从环境变量中读取数据库配置
+// 默认使用 SQLite（轻量、无需额外服务）
+// 如果设置了 MYSQL_ADDRESS，则使用 MySQL（兼容微信云托管）
 const { MYSQL_USERNAME, MYSQL_PASSWORD, MYSQL_ADDRESS = "" } = process.env;
 
-const [host, port] = MYSQL_ADDRESS.split(":");
+let sequelize;
 
-const sequelize = new Sequelize("nodejs_demo", MYSQL_USERNAME, MYSQL_PASSWORD, {
-  host,
-  port,
-  dialect: "mysql" /* one of 'mysql' | 'mariadb' | 'postgres' | 'mssql' */,
-});
+if (MYSQL_ADDRESS) {
+  // MySQL 模式（兼容微信云托管）
+  const [host, port] = MYSQL_ADDRESS.split(":");
+  sequelize = new Sequelize("nodejs_demo", MYSQL_USERNAME, MYSQL_PASSWORD, {
+    host,
+    port,
+    dialect: "mysql",
+  });
+  console.log("Using MySQL database");
+} else {
+  // SQLite 模式（默认）
+  sequelize = new Sequelize({
+    dialect: "sqlite",
+    storage: path.join(__dirname, "data", "database.sqlite"),
+    logging: false,
+  });
+  console.log("Using SQLite database");
+}
 
 // 定义数据模型
 const Counter = sequelize.define("Counter", {
